@@ -60,7 +60,7 @@ print(len(dataset))
 
 def DistilBert():
 	import torch
-	from transformers import DistilBertTokenizer,DistilBertModel
+	from transformers import RobertaTokenizer,RobertaModel
 	# Transformers has a unified API
 	# for 8 transformer architectures and 30 pretrained weights.
 	#          Model          | Tokenizer          | Pretrained weights shortcut
@@ -74,32 +74,35 @@ def DistilBert():
 	#           (DistilBertModel, DistilBertTokenizer, 'distilbert-base-uncased'),
 	#           (RobertaModel,    RobertaTokenizer,    'roberta-base')]
 
-	tokenizer = DistilBertTokenizer.from_pretrained('distilbert-base-uncased')
-	encoded_text = dataset.apply((lambda x: tokenizer.encode(x, add_special_tokens=True)))
+	tokenizer = RobertaTokenizer.from_pretrained('roberta-base')
+	encoded_text = pd.Series(dataset).apply((lambda x: tokenizer.encode(x, add_special_tokens=True)))
+	device = torch.device("cuda" if torch.cuda.is_available() else "cpu")
 	# model.resize_token_embeddings(len(encoded_text))
 	print(encoded_text[0])
 	print(len(encoded_text))
-	print(dataset.map(len).max())
-	model = DistilBertModel.from_pretrained('distilbert-base-uncased')
+	# print(dataset.map(len).max())
+	# model = RobertaModel.from_pretrained('roberta-base').to(device)
+	parallel_model = torch.nn.DataParallel(RobertaModel.from_pretrained('roberta-base').to(device))
 
 	import numpy as np
-	max_len = 512
-	# for i in encoded_text.values:
-	#     if len(i) > max_len:
-	#         max_len = len(i)
+	# max_len = 512
+	max_len = 0
+	for i in encoded_text.values:
+	    if len(i) > max_len:
+	        max_len = len(i)
 
 	padded = np.array([i + [0]*(max_len-len(i)) for i in encoded_text.values])
 
 	attention_mask = np.where(padded != 0, 1, 0)
 	print(attention_mask.shape)
 
-	input_ids = torch.tensor(padded)  
-	attention_mask = torch.tensor(attention_mask)
+	input_ids = torch.tensor(padded).to(device)  
+	attention_mask = torch.tensor(attention_mask).to(device)
 
 	with torch.no_grad():
-	    last_hidden_states = model(input_ids, attention_mask=attention_mask)
+	    last_hidden_states = parallel_model(input_ids, attention_mask=attention_mask)
 
-	embeddings = last_hidden_states[0][:,0,:].numpy()
+	embeddings = last_hidden_states[0][:,0,:].cpu().numpy()
 	print(embeddings[0])
 	print(embeddings.shape)
 	return embeddings
