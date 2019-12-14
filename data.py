@@ -36,13 +36,16 @@ class textImageDataset(torch.utils.data.Dataset):
         if self.transform is not None:
             image = self.transform(image)
 
+        # print(embedding.shape)
+        # print(image.shape)
+
         return (image,embedding)
 
     def __len__(self):
         return len(self.imageFiles)
 
 data_transform = transforms.Compose([
-            transforms.Resize(32),
+            transforms.Resize((64,64)),
             transforms.ToTensor()
         ])
 
@@ -51,13 +54,13 @@ transformed_dataset = textImageDataset(root='/scratch/ans698/combined_dataset/po
                                            transform = data_transform
                                            )
 
-dataloader = DataLoader(transformed_dataset, batch_size=250,
+dataloader = DataLoader(transformed_dataset, batch_size=64,
                         shuffle=True, num_workers=4)
 print('dataloader')
-for i, item in enumerate(dataloader):
+for i, (img,text) in enumerate(dataloader):
     # print(img.shape)
     # print(len(text))
-    print(item[0])
-    print(item[1])
+    print(img)
+    print(text)
     # print(txt)
 
