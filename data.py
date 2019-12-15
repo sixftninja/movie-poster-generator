@@ -9,13 +9,15 @@ from skimage import io, transform
 from PIL import Image
 import pickle
 import torch
+import numpy as np
+from torch.utils.data.sampler import SubsetRandomSampler
 
 class textImageDataset(torch.utils.data.Dataset):
     def __init__(self, root='/scratch/ans698/combined_dataset/poster', transform=None,text_path = 'scratch/sp5331/CV/doc2vecEmbeddings.p'):
         # super(textImageDataset, self).__init__(root,transform)
         self.transform = transform
         self.root = root
-        self.imageFiles = [f for f in sorted(os.listdir(self.root))]
+        self.imageFiles = [f for f in sorted(os.listdir(self.root)) if os.path.isfile(f)]
         self.embeddings = pickle.load(open(text_path,'rb'))
         # print(len(self.embeddings))
         # print(self.embeddings[0])
@@ -54,10 +56,33 @@ transformed_dataset = textImageDataset(root='/scratch/ans698/combined_dataset/po
                                            transform = data_transform
                                            )
 
-dataloader = DataLoader(transformed_dataset, batch_size=64,
-                        shuffle=True, num_workers=4)
+# dataloader = DataLoader(transformed_dataset, batch_size=64,
+                        # shuffle=True, num_workers=4)
+
+validation_split = .2
+random_seed = 42
+batch_size = 64
+num_workers = 4
+shuffle_dataset = True
+dataset_size = len([f for f in sorted(os.listdir('/scratch/ans698/combined_dataset/poster')) if os.path.isfile(f)])
+indices = list(range(dataset_size))
+split = int(np.floor(validation_split * dataset_size))
+if shuffle_dataset :
+    np.random.seed(random_seed)
+    np.random.shuffle(indices)
+train_indices, val_indices = indices[split:], indices[:split]
+
+# Creating PT data samplers and loaders:
+train_sampler = SubsetRandomSampler(train_indices)
+valid_sampler = SubsetRandomSampler(val_indices)
+
+train_loader = DataLoader(transformed_dataset, batch_size=batch_size, 
+                                           sampler=train_sampler,num_workers = num_workers)
+validation_loader = DataLoader(transformed_dataset, batch_size=batch_size,
+                                                sampler=valid_sampler)
+
 print('dataloader')
-for i, (img,text) in enumerate(dataloader):
+for i, (img,text) in enumerate(train_loader):
     # print(img.shape)
     # print(len(text))
     print(img)
