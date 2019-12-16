@@ -111,7 +111,7 @@ class textImageDataset(torch.utils.data.Dataset):
         img_name = self.root+'/'+ self.imageFiles[index]
         image = Image.open(img_name)
         image = image.convert('RGB')
-        embedding = torch.FloatTensor(self.embeddings[index])
+        embedding = torch.cuda.FloatTensor(self.embeddings[index])
         if self.transform is not None:
             image = self.transform(image)
 
@@ -225,7 +225,7 @@ for epoch in range(args.epochs):
             real_images.to(device)
             text_embedding.to(device)
             print('data and txt moved to gpu')
-            
+
         print(next(netD.parameters()).is_cuda)
 
         output_real = netD(real_images, text_embedding)
