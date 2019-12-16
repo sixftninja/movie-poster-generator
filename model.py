@@ -75,11 +75,13 @@ class Generator(nn.Module):
     def forward(self, input, text_embedding):
         if input.is_cuda and self.ngpu > 1:
             encoded_text = nn.parallel.data_parallel(self.encode_text, text_embedding,)
-            new_input = torch.cat(input, encoded_text)
+            #print('input: ', input.size())
+            #print('encoded_text: ', encoded_text.size())
+            new_input = torch.cat((input, encoded_text.reshape(128,256,1,1)),1)
             output = nn.parallel.data_parallel(self.main, new_input, range(self.ngpu))
         else:
             encoded_text = self.encode_text(text_embedding).view(-1,self.nt,1,1)
-            output = self.main(torch.cat((input, encode_text),1))
+            output = self.main(torch.cat((input, encoded_text),1))
         return output
 
 class Discriminator(nn.Module):
@@ -138,15 +140,20 @@ class Discriminator(nn.Module):
 
     def forward(self, input, text_embedding):
         if input.is_cuda and self.ngpu > 1:
-            #encoded_image = nn.parallel.data_parallel()
             encoded_img = nn.parallel.data_parallel(self.main, input, range(self.ngpu))
-            encoded_text = self.encode_text(text_embedding)
+            encoded_text = nn.parallel.data_parallel(self.encode_text,text_embedding,range(self.ngpu))
+            # print('encoded text1: ', encoded_text.size())
             encoded_text = encoded_text.view(-1, self.nt, 1,1)
+            # print('encoded text2: ', encoded_text.size())
             encoded_text = encoded_text.repeat(1, 1, 4, 4)
-            output = self.concat_image_n_text(torch.cat((encoded_img, encoded_text),1))
+            # print('encoded text3: ', encoded_text.size())
+            output = torch.cat((encoded_img, encoded_text),1)
+            output = self.concat_image_n_text(output)
+            #output = self.concat_image_n_text(torch.cat((encoded_img, encoded_text),1))
             return output.view(-1, 1).squeeze(1)
         else:
             encoded_img = self.main(input)
+            #print('text emdng: ', text_embedding.size())
             encoded_text = self.encode_text(text_embedding)
             encoded_text = encoded_text.view(-1, self.nt, 1,1)
             encoded_text = encoded_text.repeat(1, 1, 4, 4)

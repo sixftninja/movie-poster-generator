@@ -50,14 +50,14 @@ parser = argparse.ArgumentParser(description='cvProject')
 parser.add_argument('--inputSize', type=int, default=64, metavar='I',
                     help='number of workers (default: 4)')
 parser.add_argument('--batchSize', type=int, default=128, metavar='B',
-                    help='input batch size for training LSTM Cell (default: 1)')
+                    help='input batch size')
 parser.add_argument('--imageSize', type=int, default=64,
                     help='the height / width of the input image to network')
 parser.add_argument('--epochs', type=int, default=20, metavar='E',
-                    help='number of epochs to train (default: 30)')
+                    help='number of epochs to train (default: 20)')
 parser.add_argument('--num_workers', type=int, default=4, metavar='W',
                     help='number of workers (default: 4)')
-parser.add_argument('--seed', type=int, default=1, metavar='S', help='random seed (default: 1)')
+parser.add_argument('--seed', type=int, default=99, metavar='S', help='random seed (default: 1)')
 parser.add_argument('--nc', type=int, default=3, help='number of channels in training images')
 parser.add_argument('--nz', type=int, default=100, help='size of the latent z vector')
 parser.add_argument('--ngf', type=int, default=64, help='number of features maps in Generator')
@@ -74,9 +74,10 @@ parser.add_argument('--netD', default='', help="path to netD (to continue traini
 args = parser.parse_args()
 torch.manual_seed(args.seed)
 
-imgDataRoot =   '/scratch/ama1128/cvproject/data/poster'
-txtDataRoot =   '/scratch/ama1128/cvproject/data/doc2vecEmbeddings.p'
-modelPath   =   '/scratch/ama1128/cvproject/models'
+imgDataRoot             =   '/scratch/ama1128/cvproject/data/poster'
+txtDataRoot             =   '/scratch/ama1128/cvproject/data/doc2vecEmbeddings.p'
+modelPath               =   '/scratch/ama1128/cvproject/models'
+generatedImagesPath     =   '/scratch/ama1128/cvproject/generated_images'
 
 global gpu, device
 
@@ -111,7 +112,7 @@ class textImageDataset(torch.utils.data.Dataset):
         img_name = self.root+'/'+ self.imageFiles[index]
         image = Image.open(img_name)
         image = image.convert('RGB')
-        embedding = torch.cuda.FloatTensor(self.embeddings[index])
+        embedding = torch.FloatTensor(self.embeddings[index])
         if self.transform is not None:
             image = self.transform(image)
 
@@ -150,7 +151,7 @@ transformed_dataset = textImageDataset(root=imgDataRoot,imageFiles = imageFiles,
 # valid_sampler = SubsetRandomSampler(val_indices)
 
 train_loader = DataLoader(transformed_dataset, batch_size=args.batchSize,
-                          num_workers = args.num_workers, shuffle=True
+                          num_workers = args.num_workers, shuffle=True, drop_last=True
                          )
 val_loader = DataLoader(transformed_dataset, batch_size=args.batchSize)
 
@@ -206,7 +207,7 @@ optimizerG = optim.Adam(netG.parameters(), lr=args.lr, betas=(args.beta1, 0.999)
 '''---------------------------------------------TRAIN--------------------------------------------'''
 
 for epoch in range(args.epochs):
-    for i, (data,txt) in enumerate(train_loader):
+    for batch_idx, (data,txt) in enumerate(train_loader):
         ############################
         # (1) Update D network: maximize log(D(x)) + log(1 - D(G(z)))
         ###########################
@@ -222,11 +223,13 @@ for epoch in range(args.epochs):
         # creates tensor label of size batch_size and fills it with value of real_label=1)
         label = torch.full((batch_size,), real_label, device=device)
         if gpu:
-            real_images.to(device)
-            text_embedding.to(device)
-            print('data and txt moved to gpu')
+            real_images = real_images.to(device)
+            text_embedding = text_embedding.to(device)
 
-        print(next(netD.parameters()).is_cuda)
+        # print('data cuda: ', real_images.is_cuda)
+        # print('text cuda: ', text_embedding.is_cuda)
+        # print('label cude: ', label.is_cuda)
+        # print('model: ', next(netD.parameters()).is_cuda)
 
         output_real = netD(real_images, text_embedding)
         errD_real = criterion(output_real, label)
@@ -237,7 +240,7 @@ for epoch in range(args.epochs):
         ######################
         # TRAIN WITH MISMATCH
         ######################
-        text_embedding_wrong = torch.randn(args.batchSize, nte, 1, 1).normal_(0, 1, device=device)
+        text_embedding_wrong = torch.randn(args.batchSize, args.nte).normal_(0, 1).to(device)
         label.fill_(fake_label)
         output_mismatch = netD(real_images, text_embedding_wrong)
         errD_mismatch = criterion(output_mismatch, label) * 0.5
@@ -247,8 +250,8 @@ for epoch in range(args.epochs):
         # TRAIN WITH FAKE
         ######################
         # noise = torch.randn(batch_size, nz, 1, 1, device=device)
-        noise = torch.FloatTensor(args.batchSize, nz, 1, 1, device=device).normal_(0, 1, device=device)
-        fake_images = netG(noise)
+        noise = torch.FloatTensor(args.batchSize, nz, 1, 1).normal_(0, 1).to(device)
+        fake_images = netG(noise, text_embedding)
         # use fake labels, fake_label=0
         label.fill_(fake_label)
         # detach clears gradients because 'fake' has accumulated while being passed through the Generator
@@ -257,30 +260,28 @@ for epoch in range(args.epochs):
         errD_fake.backward()
         D_G_z1 = output.mean().item()
         errD = errD_real + errD_fake + errD_mismatch
-        argsimizerD.step()
+        optimizerD.step()
 
         ############################
         # (2) Update G network: maximize log(D(G(z)))
         ###########################
         netG.zero_grad()
         label.fill_(real_label)  # fake labels are real for generator cost
-        output = netD(fake_images)
+        output = netD(fake_images, text_embedding)
         errG = criterion(output, label)
         errG.backward()
         D_G_z2 = output.mean().item()
-        argsimizerG.step()
+        optimizerG.step()
 
-        print('[%d/%d][%d/%d] Loss_D: %.4f Loss_G: %.4f D(x): %.4f D(G(z)): %.4f / %.4f'
-              % (epoch, args.niter, i, len(dataloader),
-                 errD.item(), errG.item(), D_x, D_G_z1, D_G_z2))
-        if i % 100 == 0:
-            vutils.save_image(real_cpu,
-                    '%s/real_samples.png' % args.outf,
-                    normalize=True)
-            fake = netG(fixed_noise)
-            vutils.save_image(fake.detach(),
-                    '%s/fake_samples_epoch_%03d.png' % (args.outf, epoch),
-                    normalize=True)
+        if batch_idx % 10 == 0:
+            print('Epoch: [{}/{}] [{}/{}] Loss_D: {:.4f} Loss_G: {:.4f} D(x): {:.4f} D(G(z)): {:.4f}'.format(epoch, args.epochs, batch_idx*len(data), len(train_loader.dataset), errD.item(), errG.item(), D_x, (D_G_z1/D_G_z2)))
+
+        # if batch_idx % 100 == 0:
+        #     vutils.save_image(real_images, '%s/real_samples.png' % generatedImagesPath,
+        #                       normalize=True)
+        #     fake = netG(fixed_noise, text_embedding)
+        #     vutils.save_image(fake.detach(),'%s/fake_samples_epoch_%03d.png' %
+        #                       (generatedImagesPath, epoch), normalize=True)
 
     # SAVE CHECKPOINTS
     torch.save(netG.state_dict(), '%s/netG_epoch_%d.pth' % (modelPath, epoch))

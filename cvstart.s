@@ -13,4 +13,4 @@
 module load cuda/9.2.88
 
 cd /scratch/ama1128/cvproject
-python cvProject.py --epochs 100
+python cvProject.py --epochs 30
