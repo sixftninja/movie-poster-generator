@@ -224,6 +224,9 @@ for epoch in range(args.epochs):
         if gpu:
             real_images.to(device)
             text_embedding.to(device)
+            print('data and txt moved to gpu')
+            
+        print(next(netD.parameters()).is_cuda)
 
         output_real = netD(real_images, text_embedding)
         errD_real = criterion(output_real, label)
