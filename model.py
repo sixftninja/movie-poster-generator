@@ -7,6 +7,11 @@ class Generator(nn.Module):
     def __init__(self, ngpu, nz, ngf, nc, nte, nt):
         super(Generator, self).__init__()
         self.ngpu = ngpu
+        self.nz = nz
+        self.nc = nc
+        self.ngf = ngf
+        self.nte = nte
+        self.nt = nt
         self.main = nn.Sequential(
             # input is Z + text_embedding, going into convolution
             nn.ConvTranspose2d(nz + nt, ngf * 8, 4, 1, 0, bias=False),
@@ -74,13 +79,17 @@ class Generator(nn.Module):
             output = nn.parallel.data_parallel(self.main, new_input, range(self.ngpu))
         else:
             encoded_text = self.encode_text(text_embedding).view(-1,self.nt,1,1)
-            output = self.main(torch.cat((input, encode_text),1)
+            output = self.main(torch.cat((input, encode_text),1))
         return output
 
 class Discriminator(nn.Module):
     def __init__(self, ngpu, nc, ndf, nte, nt):
         super(Discriminator, self).__init__()
         self.ngpu = ngpu
+        self.nc = nc
+        self.ndf = ndf
+        self.nte = nte
+        self.nt = nt
 
         self.main = nn.Sequential(
             # input is (nc) x 64 x 64
