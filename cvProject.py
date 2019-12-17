@@ -17,6 +17,8 @@ from skimage import io, transform
 from PIL import Image
 import pickle
 from torch.utils.data.sampler import SubsetRandomSampler
+from visdom import visdom
+import csv
 # from collections import namedtuple
 # from torch.utils.data.dataset import Dataset, DataLoader
 
@@ -204,6 +206,75 @@ fake_label = 0
 optimizerD = optim.Adam(netD.parameters(), lr=args.lr, betas=(args.beta1, 0.999))
 optimizerG = optim.Adam(netG.parameters(), lr=args.lr, betas=(args.beta1, 0.999))
 
+'''--------------------------------------------Visdom--------------------------------------------'''
+
+class VisdomLinePlotter(object):
+    """Plots to Visdom"""
+    def __init__(self, env_name='main'):
+        self.viz = Visdom()
+        self.env = env_name
+        self.plots = {}
+    def plot(self, var_name, split_name, title_name, x, y):
+        if var_name not in self.plots:
+            self.plots[var_name] = self.viz.line(X=np.array([x,x]), Y=np.array([y,y]), env=self.env, opts=dict(
+                legend=[split_name],
+                title=title_name,
+                xlabel='Epochs',
+                ylabel=var_name
+            ))
+        else:
+            self.viz.line(X=np.array([x]), Y=np.array([y]), env=self.env, win=self.plots[var_name], name=split_name, update = 'append')
+
+# plotter = VisdomLinePlotter()
+
+'''-----------------------------------------AVERAGEMETER-----------------------------------------'''
+
+class AverageMeter(object):
+    """Computes and stores the average and current value"""
+    def __init__(self):
+        self.reset()
+
+    def reset(self):
+        self.val = 0
+        self.avg = 0
+        self.sum = 0
+        self.count = 0
+
+    def update(self, val, n=1):
+        self.val = val
+        self.sum += val * n
+        self.count += n
+        self.avg = self.sum / self.count
+
+'''-------------------------------------------GRADIENTS------------------------------------------'''
+G_Losses            = []
+D_Losses            = []
+G_Grads             = []
+D_Grads_real        = []
+D_Grads_fake        = []
+D_Grads_mismatch    = []
+D_x_vals            = []
+D_G_z1_vals         = []
+D_G_z2_vals         = []
+
+def store_gradients(model_name, epoch, batch_idx, named_parameters):
+    if model_name == 'netG':
+        for n, p in named_parameters:
+            if(p.requires_grad) and ("bias" not in n):
+                G_Grads.append([epoch, batch_idx, n, p.grad.abs().mean()])
+    if model_name == 'netD_real':
+        for n, p in named_parameters:
+            if(p.requires_grad) and ("bias" not in n):
+                D_Grads_real.append([epoch, batch_idx, n, p.grad.abs().mean()])
+    if model_name == 'netD_fake':
+        for n, p in named_parameters:
+            if(p.requires_grad) and ("bias" not in n):
+                D_Grads_fake.append([epoch, batch_idx, n, p.grad.abs().mean()])
+    if model_name == 'netD_mismatch':
+        for n, p in named_parameters:
+            if(p.requires_grad) and ("bias" not in n):
+                D_Grads_mismatch.append([epoch, batch_idx, n, p.grad.abs().mean()])
+
 '''---------------------------------------------TRAIN--------------------------------------------'''
 
 for epoch in range(args.epochs):
@@ -234,6 +305,7 @@ for epoch in range(args.epochs):
         output_real = netD(real_images, text_embedding)
         errD_real = criterion(output_real, label)
         errD_real.backward()
+        store_gradients('netD_real', epoch, batch_idx, netD.named_parameters())
         # Probability for each image of being real given by D averaged over all images in batch
         D_x = output_real.mean().item()
 
@@ -245,6 +317,7 @@ for epoch in range(args.epochs):
         output_mismatch = netD(real_images, text_embedding_wrong)
         errD_mismatch = criterion(output_mismatch, label) * 0.5
         errD_mismatch.backward()
+        store_gradients('netD_mismatch', epoch, batch_idx, netD.named_parameters())
 
         ######################
         # TRAIN WITH FAKE
@@ -258,8 +331,10 @@ for epoch in range(args.epochs):
         output = netD(fake_images.detach(), text_embedding.detach())
         errD_fake = criterion(output, label) * 0.5
         errD_fake.backward()
+        store_gradients('netD_fake', epoch, batch_idx, netD.named_parameters())
         D_G_z1 = output.mean().item()
         errD = errD_real + errD_fake + errD_mismatch
+
         optimizerD.step()
 
         ############################
@@ -270,11 +345,18 @@ for epoch in range(args.epochs):
         output = netD(fake_images, text_embedding)
         errG = criterion(output, label)
         errG.backward()
+        store_gradients('netG', epoch, batch_idx, netG.named_parameters())
         D_G_z2 = output.mean().item()
         optimizerG.step()
 
         if batch_idx % 10 == 0:
             print('Epoch: [{}/{}] [{}/{}] Loss_D: {:.4f} Loss_G: {:.4f} D(x): {:.4f} D(G(z)): {:.4f}'.format(epoch, args.epochs, batch_idx*len(data), len(train_loader.dataset), errD.item(), errG.item(), D_x, (D_G_z1/D_G_z2)))
+
+            D_x_vals.append([epoch, batch_idx, D_x])
+            D_G_z1_vals.append([epoch, batch_idx, D_G_z1])
+            D_G_z2_vals.append([epoch, batch_idx, D_G_z2])
+            D_Losses.append([epoch, batch_idx, errD.item])
+            G_Losses.append([epoch, batch_idx, errG.item])
 
         # if batch_idx % 100 == 0:
         #     vutils.save_image(real_images, '%s/real_samples.png' % generatedImagesPath,
@@ -283,6 +365,39 @@ for epoch in range(args.epochs):
         #     vutils.save_image(fake.detach(),'%s/fake_samples_epoch_%03d.png' %
         #                       (generatedImagesPath, epoch), normalize=True)
 
+    # VISUALIZE
+    plotter.plot('Loss_D', 'train', 'Discriminator Loss', epoch, )
+
     # SAVE CHECKPOINTS
     torch.save(netG.state_dict(), '%s/netG_epoch_%d.pth' % (modelPath, epoch))
     torch.save(netD.state_dict(), '%s/netD_epoch_%d.pth' % (modelPath, epoch))
+
+'''--------------------------------------------CSV_OUT-------------------------------------------'''
+
+with open('D_Grads_real', 'w') as myfile:
+    wr = csv.writer(myfile, quoting=csv.QUOTE_ALL)
+    wr.writerow(D_Grads_real)
+with open('D_Grads_fake', 'w') as myfile:
+    wr = csv.writer(myfile, quoting=csv.QUOTE_ALL)
+    wr.writerow(D_Grads_fake)
+with open('D_Grads_mismatch', 'w') as myfile:
+    wr = csv.writer(myfile, quoting=csv.QUOTE_ALL)
+    wr.writerow(D_Grads_mismatch)
+with open('D_x_vals', 'w') as myfile:
+    wr = csv.writer(myfile, quoting=csv.QUOTE_ALL)
+    wr.writerow(D_x_vals)
+with open('D_G_z1_vals', 'w') as myfile:
+    wr = csv.writer(myfile, quoting=csv.QUOTE_ALL)
+    wr.writerow(D_G_z1_vals)
+with open('D_G_z2_vals', 'w') as myfile:
+    wr = csv.writer(myfile, quoting=csv.QUOTE_ALL)
+    wr.writerow(D_G_z2_vals)
+with open('D_Losses', 'w') as myfile:
+    wr = csv.writer(myfile, quoting=csv.QUOTE_ALL)
+    wr.writerow(D_Losses)
+with open('D_Losses', 'w') as myfile:
+    wr = csv.writer(myfile, quoting=csv.QUOTE_ALL)
+    wr.writerow(D_Losses)
+with open('G_Losses', 'w') as myfile:
+    wr = csv.writer(myfile, quoting=csv.QUOTE_ALL)
+    wr.writerow(G_Losses)
