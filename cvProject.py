@@ -13,12 +13,13 @@ from torch.utils.data import Dataset, DataLoader
 import torchvision.utils as vutils
 import torch.optim as optim
 import numpy as np
+import pandas as pd
 from skimage import io, transform
 from PIL import Image
 import pickle
 from torch.utils.data.sampler import SubsetRandomSampler
-from visdom import visdom
 import csv
+#from visdom import visdom
 # from collections import namedtuple
 # from torch.utils.data.dataset import Dataset, DataLoader
 
@@ -200,30 +201,30 @@ criterion = nn.BCELoss()
 input = torch.FloatTensor(args.batchSize, 3, args.imageSize, args.imageSize).to(device)
 fixed_noise = torch.FloatTensor(args.batchSize, nz, 1, 1).normal_(0, 1).to(device)
 label = torch.FloatTensor(args.batchSize).to(device)
-real_label = 1
-fake_label = 0
+real_label = random.uniform(0.9, 1.0)
+fake_label = random.uniform(0.0, 0.1)
 
 optimizerD = optim.Adam(netD.parameters(), lr=args.lr, betas=(args.beta1, 0.999))
 optimizerG = optim.Adam(netG.parameters(), lr=args.lr, betas=(args.beta1, 0.999))
 
 '''--------------------------------------------Visdom--------------------------------------------'''
 
-class VisdomLinePlotter(object):
-    """Plots to Visdom"""
-    def __init__(self, env_name='main'):
-        self.viz = Visdom()
-        self.env = env_name
-        self.plots = {}
-    def plot(self, var_name, split_name, title_name, x, y):
-        if var_name not in self.plots:
-            self.plots[var_name] = self.viz.line(X=np.array([x,x]), Y=np.array([y,y]), env=self.env, opts=dict(
-                legend=[split_name],
-                title=title_name,
-                xlabel='Epochs',
-                ylabel=var_name
-            ))
-        else:
-            self.viz.line(X=np.array([x]), Y=np.array([y]), env=self.env, win=self.plots[var_name], name=split_name, update = 'append')
+# class VisdomLinePlotter(object):
+#     """Plots to Visdom"""
+#     def __init__(self, env_name='main'):
+#         self.viz = Visdom()
+#         self.env = env_name
+#         self.plots = {}
+#     def plot(self, var_name, split_name, title_name, x, y):
+#         if var_name not in self.plots:
+#             self.plots[var_name] = self.viz.line(X=np.array([x,x]), Y=np.array([y,y]), env=self.env, opts=dict(
+#                 legend=[split_name],
+#                 title=title_name,
+#                 xlabel='Epochs',
+#                 ylabel=var_name
+#             ))
+#         else:
+#             self.viz.line(X=np.array([x]), Y=np.array([y]), env=self.env, win=self.plots[var_name], name=split_name, update = 'append')
 
 # plotter = VisdomLinePlotter()
 
@@ -358,15 +359,15 @@ for epoch in range(args.epochs):
             D_Losses.append([epoch, batch_idx, errD.item])
             G_Losses.append([epoch, batch_idx, errG.item])
 
-        # if batch_idx % 100 == 0:
-        #     vutils.save_image(real_images, '%s/real_samples.png' % generatedImagesPath,
-        #                       normalize=True)
-        #     fake = netG(fixed_noise, text_embedding)
-        #     vutils.save_image(fake.detach(),'%s/fake_samples_epoch_%03d.png' %
-        #                       (generatedImagesPath, epoch), normalize=True)
+        if batch_idx % 100 == 0:
+            vutils.save_image(real_images, '%s/real_samples.png' % generatedImagesPath,
+                              normalize=True)
+            fake = netG(fixed_noise, text_embedding)
+            vutils.save_image(fake.detach(),'%s/fake_samples_epoch_%03d.png' %
+                              (generatedImagesPath, epoch), normalize=True)
 
     # VISUALIZE
-    plotter.plot('Loss_D', 'train', 'Discriminator Loss', epoch, )
+    #plotter.plot('Loss_D', 'train', 'Discriminator Loss', epoch, )
 
     # SAVE CHECKPOINTS
     torch.save(netG.state_dict(), '%s/netG_epoch_%d.pth' % (modelPath, epoch))
@@ -374,30 +375,26 @@ for epoch in range(args.epochs):
 
 '''--------------------------------------------CSV_OUT-------------------------------------------'''
 
-with open('D_Grads_real', 'w') as myfile:
-    wr = csv.writer(myfile, quoting=csv.QUOTE_ALL)
-    wr.writerow(D_Grads_real)
-with open('D_Grads_fake', 'w') as myfile:
-    wr = csv.writer(myfile, quoting=csv.QUOTE_ALL)
-    wr.writerow(D_Grads_fake)
-with open('D_Grads_mismatch', 'w') as myfile:
-    wr = csv.writer(myfile, quoting=csv.QUOTE_ALL)
-    wr.writerow(D_Grads_mismatch)
-with open('D_x_vals', 'w') as myfile:
-    wr = csv.writer(myfile, quoting=csv.QUOTE_ALL)
-    wr.writerow(D_x_vals)
-with open('D_G_z1_vals', 'w') as myfile:
-    wr = csv.writer(myfile, quoting=csv.QUOTE_ALL)
-    wr.writerow(D_G_z1_vals)
-with open('D_G_z2_vals', 'w') as myfile:
-    wr = csv.writer(myfile, quoting=csv.QUOTE_ALL)
-    wr.writerow(D_G_z2_vals)
-with open('D_Losses', 'w') as myfile:
-    wr = csv.writer(myfile, quoting=csv.QUOTE_ALL)
-    wr.writerow(D_Losses)
-with open('D_Losses', 'w') as myfile:
-    wr = csv.writer(myfile, quoting=csv.QUOTE_ALL)
-    wr.writerow(D_Losses)
-with open('G_Losses', 'w') as myfile:
-    wr = csv.writer(myfile, quoting=csv.QUOTE_ALL)
-    wr.writerow(G_Losses)
+D_grads_real_df        = pd.DataFrame(D_Grads_real)
+D_grads_real_df.to_csv('D_grads_real.csv')
+
+D_grads_fake_df        = pd.DataFrame(D_Grads_fake)
+D_grads_fake_df.to_csv('D_grads_fake.csv')
+
+D_grads_mismatch_df    = pd.DataFrame(D_Grads_mismatch)
+D_grads_mismatch_df.to_csv('D_grads_mismatch.csv')
+
+D_x_df                 = pd.DataFrame(D_x_vals)
+D_x_df.to_csv('D_x.csv')
+
+D_G_z1_df              = pd.DataFrame(D_G_z1_vals)
+D_G_z1_df.to_csv('D_G_z1.csv')
+
+D_G_z2_df              = pd.DataFrame(D_G_z2_vals)
+D_G_z2_df.to_csv('D_G_z2.csv')
+
+D_Losses_df               = pd.DataFrame(D_Losses)
+D_Losses_df.to_csv('D_Losses.csv')
+
+G_Losses_df               = pd.DataFrame(G_Losses)
+G_Losses_df.to_csv('G_Losses.csv')
