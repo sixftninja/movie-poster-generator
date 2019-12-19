@@ -16,4 +16,4 @@ module load anaconda3/5.3.1
 source activate matrix
 
 cd /scratch/ama1128/cvproject
-python cvProject.py --epochs 30
+python cvProject.py --epochs 50

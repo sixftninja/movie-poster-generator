@@ -67,7 +67,9 @@ parser.add_argument('--ngf', type=int, default=64, help='number of features maps
 parser.add_argument('--ndf', type=int, default=64, help='number of features maps in Discriminator')
 parser.add_argument('--nte', type=int, default=512, help='the size of text embedding vector')
 parser.add_argument('--nt', type=int, default=256, help='the reduced size of text embedding vector')
-parser.add_argument('--lr', type=float, default=0.0002, help='learning rate, default=0.0002')
+parser.add_argument('--lrAdam', type=float, default=0.0002, help='learning rate for Adam(G) default=0.0002')
+parser.add_argument('--lrSGD', type=float, default=0.0001, help='learning rate for SGD(D) default=0.0001')
+parser.add_argument('--momentum', type=float, default=0.9, help='Momentum, default=0.9')
 parser.add_argument('--beta1', type=float, default=0.5, help='beta1 for adam. default=0.5')
 parser.add_argument('--cuda', action='store_true', help='enables cuda')
 parser.add_argument('--ngpu', type=int, default=1, help='number of GPUs to use')
@@ -201,11 +203,12 @@ criterion = nn.BCELoss()
 input = torch.FloatTensor(args.batchSize, 3, args.imageSize, args.imageSize).to(device)
 fixed_noise = torch.FloatTensor(args.batchSize, nz, 1, 1).normal_(0, 1).to(device)
 label = torch.FloatTensor(args.batchSize).to(device)
-real_label = random.uniform(0.9, 1.0)
-fake_label = random.uniform(0.0, 0.1)
+real_label = random.uniform(0.8, 1.1)
+fake_label = random.uniform(0.0, 0.3)
 
-optimizerD = optim.Adam(netD.parameters(), lr=args.lr, betas=(args.beta1, 0.999))
-optimizerG = optim.Adam(netG.parameters(), lr=args.lr, betas=(args.beta1, 0.999))
+#optimizerD = optim.SGD(netD.parameters(), lr=args.lrSGD, momentum=args.momentum)
+optimizerD = optim.Adam(netD.parameters(), lr=args.lrAdam, betas=(args.beta1, 0.999))
+optimizerG = optim.Adam(netG.parameters(), lr=args.lrAdam, betas=(args.beta1, 0.999))
 
 '''--------------------------------------------Visdom--------------------------------------------'''
 
@@ -293,7 +296,8 @@ for epoch in range(args.epochs):
         # real_cpu.size(0) returns number of images in batch
         batch_size = real_images.size(0)
         # creates tensor label of size batch_size and fills it with value of real_label=1)
-        label = torch.full((batch_size,), real_label, device=device)
+        # label = torch.full((batch_size,), real_label, device=device)
+        label = torch.full((batch_size,), random.uniform(0.8, 1.1), device=device)
         if gpu:
             real_images = real_images.to(device)
             text_embedding = text_embedding.to(device)
@@ -314,7 +318,8 @@ for epoch in range(args.epochs):
         # TRAIN WITH MISMATCH
         ######################
         text_embedding_wrong = torch.randn(args.batchSize, args.nte).normal_(0, 1).to(device)
-        label.fill_(fake_label)
+        # label.fill_(fake_label)
+        label.fill_(random.uniform(0.0, 0.3))
         output_mismatch = netD(real_images, text_embedding_wrong)
         errD_mismatch = criterion(output_mismatch, label) * 0.5
         errD_mismatch.backward()
@@ -323,12 +328,13 @@ for epoch in range(args.epochs):
         ######################
         # TRAIN WITH FAKE
         ######################
-        # noise = torch.randn(batch_size, nz, 1, 1, device=device)
+
         noise = torch.FloatTensor(args.batchSize, nz, 1, 1).normal_(0, 1).to(device)
         fake_images = netG(noise, text_embedding)
-        # use fake labels, fake_label=0
-        label.fill_(fake_label)
-        # detach clears gradients because 'fake' has accumulated while being passed through the Generator
+        # use fake labels
+        # label.fill_(fake_label)
+        label.fill_(random.uniform(0.0, 0.3))
+        # detach clears gradients that fake images have accumulated while being passed through the Generator
         output = netD(fake_images.detach(), text_embedding.detach())
         errD_fake = criterion(output, label) * 0.5
         errD_fake.backward()
@@ -342,7 +348,8 @@ for epoch in range(args.epochs):
         # (2) Update G network: maximize log(D(G(z)))
         ###########################
         netG.zero_grad()
-        label.fill_(real_label)  # fake labels are real for generator cost
+        # label.fill_(real_label)  # fake labels are real for generator cost
+        label.fill_(random.uniform(0.8, 1.1))
         output = netD(fake_images, text_embedding)
         errG = criterion(output, label)
         errG.backward()
@@ -356,8 +363,8 @@ for epoch in range(args.epochs):
             D_x_vals.append([epoch, batch_idx, D_x])
             D_G_z1_vals.append([epoch, batch_idx, D_G_z1])
             D_G_z2_vals.append([epoch, batch_idx, D_G_z2])
-            D_Losses.append([epoch, batch_idx, errD.item])
-            G_Losses.append([epoch, batch_idx, errG.item])
+            D_Losses.append([epoch, batch_idx, errD.item()])
+            G_Losses.append([epoch, batch_idx, errG.item()])
 
         if batch_idx % 100 == 0:
             vutils.save_image(real_images, '%s/real_samples.png' % generatedImagesPath,
@@ -366,6 +373,7 @@ for epoch in range(args.epochs):
             vutils.save_image(fake.detach(),'%s/fake_samples_epoch_%03d.png' %
                               (generatedImagesPath, epoch), normalize=True)
 
+    print('-------------------------------------------------------------------------------------')
     # VISUALIZE
     #plotter.plot('Loss_D', 'train', 'Discriminator Loss', epoch, )
 
